@@ -34,11 +34,6 @@ let string_of_object ob =
      | (n,(Bool v)) -> string_of_bool v
      | (n,(Str v)) -> v;;
 
-let int_of_atom value =
-  match value with
-  | Atom ("integer",(Int v)) -> v
-  | _ -> failwith "not int";;
-
 let make_int value = Atom ("integer",(Int value))
 
 let make_float value = Atom ("float",(Float value))
@@ -232,24 +227,25 @@ let rec foldl f exp init =
   iter exp init;;
 
 let snd (x,y) = y;;
+
 let fst (x,y) = x;;
 
-let rec eval (exp,env) =
-  let begin_impl exp env = foldl (fun x y -> eval (x,snd y)) exp (Nil,env) in
+let rec eval exp env =
+  let begin_impl exp env = foldl (fun x y -> eval x (snd y)) exp (Nil,env) in
   if is_quoted exp then ((car (cdr exp)),env)
   else if is_define exp then
     match car (cdr exp) with
     | Symbol _ -> ((make_string "OK"),(bind
                                          (car (cdr exp))
-                                         (fst (eval ((car (cdr (cdr exp))),env)))
+                                         (fst (eval (car (cdr (cdr exp))) env))
                                          env))
     | _ -> failwith "is not symbol"
   else if is_lambda exp then (Proc (car (cdr exp),car (cdr (cdr exp)),([]::env)),env)
   else if is_begin exp then begin_impl (cdr exp) env
   else if is_if exp then
-    match fst (eval ((car (cdr exp)),env)) with
-    | Atom ("bool",Bool true) ->  (eval ((car (cdr (cdr exp))),env))
-    | Atom ("bool",Bool false) ->  (eval ((car (cdr (cdr (cdr exp)))),env))
+    match fst (eval (car (cdr exp)) env) with
+    | Atom ("bool",Bool true) ->  (eval (car (cdr (cdr exp))) env)
+    | Atom ("bool",Bool false) ->  (eval (car (cdr (cdr (cdr exp)))) env)
     | _ -> failwith "is not boolean"
   else match exp with
        | Nil -> (Nil,env)
@@ -259,14 +255,14 @@ let rec eval (exp,env) =
              (search_exp exp env,env)
            with
              Not_found -> failwith (string_of_object exp))
-       | Cons (x,args) -> apply (fst (eval (x,env))) (map (fun x -> fst (eval (x,env))) args)
+       | Cons (x,args) -> (apply (fst (eval x env)) (map (fun x -> fst (eval x env)) args),env)
        | _ -> failwith "toriaezu"
 and apply proc args_val =
   let bind_sequence args exp env =
     foldl (fun (Cons (x1,x2)) env -> bind x1 x2 env) (zip args exp) env in
   match proc with
-  | Proc (args_sym,body,env) -> eval (body,(bind_sequence args_sym args_val env))
-  | Prim_proc pr -> (pr args_val,[])
+  | Proc (args_sym,body,env) -> fst (eval body (bind_sequence args_sym args_val env))
+  | Prim_proc pr -> pr args_val
   | (Cons (_,_))-> failwith "cons"
   | Nil -> failwith "nil"
   | _ -> failwith (string_of_object proc);;
@@ -278,12 +274,37 @@ let rec read_s_exp chan =
   with
     e -> "";;
 
-let rec loop () =
-  let () = print_endline (read_line ()) in (loop ());;
+let rec count_paren str_ls =
+  match str_ls with
+  | [] -> 0
+  | "(" :: xs -> 1 + count_paren xs
+  | ")" :: xs -> (-1) + count_paren xs
+  | _ :: xs -> count_paren xs;;
 
-let env = [[((make_symbol "+"),(Prim_proc plus_proc));
-            ((make_symbol "-"),(Prim_proc minus_proc));
-            ((make_symbol "*"),(Prim_proc times_proc));]];;
+let repl () =
+  let init_env = [[((make_symbol "+"),(Prim_proc plus_proc));
+              ((make_symbol "-"),(Prim_proc minus_proc));
+              ((make_symbol "*"),(Prim_proc times_proc));]] in
+  let rec iter buf env = 
+    let total_buf = buf @ (separate_s_exp (list_of_string (read_line ()))) in
+    if (count_paren total_buf) = 0
+    then
+      match total_buf |> str_tree_list_of_str_list with
+      | str_tree :: _ -> let (res,nenv) = eval (exp_of_str_tree str_tree) env in
+                         let () = res |> string_of_object |> print_endline in
+                         let () = "min_lisp > " |> print_string in
+                         iter [] nenv
+      | _ -> failwith "this pattern never occurs"
+    else
+      iter total_buf env in
+  let () = "min_lisp > " |> print_string in
+  iter [] init_env;;
 
-List.map (fun x -> print_endline (string_of_object (fst (eval ((exp_of_str_tree x),env)))))
-  (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list);;
+(* let env = [[((make_symbol "+"),(Prim_proc plus_proc));
+ *             ((make_symbol "-"),(Prim_proc minus_proc));
+ *             ((make_symbol "*"),(Prim_proc times_proc));]];; *)
+
+(* List.map (fun x -> print_endline (string_of_object (fst (eval (exp_of_str_tree x) env))))
+ *   (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list);; *)
+
+repl ();;
