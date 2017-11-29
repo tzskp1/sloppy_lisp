@@ -1,4 +1,4 @@
-type 'a proc = { args: 'a; body: 'a; env: ('a,'a) Hashtbl.t; prim: bool; func: ('a -> 'a) };;
+type 'a proc = { args: 'a; body: 'a; env: ('a *'a) list list};;
 
 type 'a dtype = string * 'a (* type_name,value *)
 
@@ -114,7 +114,6 @@ let str_tree_list_of_str_list sexp =
     | ("(" :: x :: xs,_) -> s2exp xs ([Leaf x] :: res)
     | (n :: xs,y :: ys) -> s2exp xs (((Leaf n) :: y) :: ys)
     | (_,[]) -> failwith "paren_error" in rev (List.hd (s2exp sexp []));;
-    (* | (_,[]) -> failwith "paren_error" in List.hd (List.hd (s2exp sexp []));; *)
 
 let rec exp_of_str_tree str_tree =
   let classify str =
@@ -131,11 +130,24 @@ let rec exp_of_str_tree str_tree =
      | x :: [] -> (Cons ((exp_of_str_tree x),Nil))
      | x :: xs -> (Cons ((exp_of_str_tree x),exp_of_str_tree (Node xs)));;
 
-let is_there_exp exp env = Hashtbl.mem env exp;;
+let rec search_frame exp frame =
+  match frame with
+  | [] -> raise Not_found
+  | (x,y) :: xs -> if x = exp then y else search_frame exp xs
 
-let search_exp exp env = Hashtbl.find env exp;;
+let rec search_exp exp env =
+  match env with
+  | [] -> raise Not_found
+  | x :: xs ->
+     try
+       search_frame exp x
+     with
+       Not_found -> search_exp exp xs
 
-let bind exp value env = Hashtbl.add env exp value;;
+let bind exp value env =
+  match env with
+  | [] -> [[(exp,value)]]
+  | x :: xs -> (((exp,value) :: x) :: xs)
 
 let is_tagged_list tag exp =
   match (exp,tag) with
@@ -162,9 +174,7 @@ let cdr exp =
   | Cons (x,y) -> y
   | _ -> failwith "is not list";;
 
-let make_proc arg bod ev = { args=arg; body=bod; env=(Hashtbl.copy ev); prim=false; func=(fun _ -> Nil);};;
-
-let make_prim_proc fn = { args=Nil; body=Nil; env=(Hashtbl.create 1); prim=true; func=fn;};;
+let make_proc arg bod ev = { args=arg; body=bod; env=ev;};;
 
 let rec length exp =
   match exp with
@@ -208,39 +218,56 @@ let rec zip xs ys =
     | _ -> failwith "is not list"
   else failwith "argument length's error";;
 
+let snd (x,y) = y;;
+let fst (x,y) = x;;
+
 let rec eval env exp =
-  if is_quoted exp then (car (cdr exp))
+  if is_quoted exp then ((car (cdr exp)),env)
   else if is_define exp then
     match car (cdr exp) with
-    | Symbol x -> let () = (bind (car (cdr exp)) (eval env (car (cdr (cdr exp)))) env) in (make_string "OK")
+    | Symbol _ -> let (ex,_) = (eval env (car (cdr (cdr exp)))) in
+                  ((make_string "OK"),(bind (car (cdr exp)) ex env))
     | _ -> failwith "is not symbol"
-  else if is_lambda exp then Proc (make_proc (car (cdr exp)) (car (cdr (cdr exp))) env)
-  else if is_begin exp then mapl (eval env) (cdr exp)
+  else if is_lambda exp then (Proc (make_proc (car (cdr exp)) (car (cdr (cdr exp))) ([]::env)),env)
+  else if is_begin exp then begin_impl (cdr exp) env
   else if is_if exp then
     match (eval env (car (cdr exp))) with
-    | Atom ("bool",Bool true) ->  (eval env (car (cdr (cdr exp))))
-    | Atom ("bool",Bool false) ->  (eval env (car (cdr (cdr (cdr exp)))))
+    | (Atom ("bool",Bool true),_) ->  (eval env (car (cdr (cdr exp))))
+    | (Atom ("bool",Bool false),_) ->  (eval env (car (cdr (cdr (cdr exp)))))
     | _ -> failwith "is not boolean"
   else match exp with
-       | Nil -> Nil
-       | Atom _ -> exp
-       | Cons (x,args) -> apply (eval env x) (map (eval env) args)
-       | Symbol _ -> search_exp exp env
+       | Nil -> (Nil,env)
+       | Atom _ -> (exp,env)
+       | Symbol _ ->
+          (try
+            (search_exp exp env,env)
+          with
+            Not_found -> failwith (string_of_object exp))
+       | Cons (x,args) -> apply (fst (eval env x)) (map (fun x -> fst (eval env x)) args)
        | _ -> failwith "toriaezu"
 and apply proc arg =
   match proc with
   | Proc pr ->
      (match pr with
-     | {args=ags; body=bd; env=ev; prim=pm; func=fn;} -> 
-        if not pm then
-          let () = bind_sequence ags arg ev in (eval ev bd)
-        else fn arg)
+     | {args=ags; body=bd; env=ev;} ->
+        let ev2 = bind_sequence ags arg ev in (eval ev2 bd))
+  | Prim_proc pr -> (pr arg,[])
   | (Cons (_,_))-> failwith "cons"
   | Nil -> failwith "nil"
-  | _ -> failwith "tori"
+  | _ -> failwith (string_of_object proc)
 and bind_sequence args exp env =
-  let bd (Cons (x,y)) = bind x y env in
-  let _ = mapl bd (zip args exp) in ();;
+  let rec iter env exp = 
+    match exp with
+    | Cons (Cons(x1,x2),Nil) -> bind x1 x2 env
+    | Cons (Cons(x1,x2),y) -> iter (bind x1 x2 env) y
+    | _ -> failwith "is not list" in
+  iter env (zip args exp) 
+and begin_impl exp env =
+  match exp with
+  | Cons (x,Nil) -> eval env x
+  | Cons (x,y) -> let (_,ev) = eval env x in
+                  begin_impl y ev
+  | _ -> failwith "is not list"
 
 let rec read_s_exp chan =
   try 
@@ -252,14 +279,12 @@ let rec read_s_exp chan =
 let rec loop () =
   let () = print_endline (read_line ()) in (loop ());;
 
-let env = Hashtbl.create 10000;;
-Hashtbl.add env (make_symbol "+") (Proc (make_prim_proc plus_proc));;
-Hashtbl.add env (make_symbol "-") (Proc (make_prim_proc minus_proc));;
-Hashtbl.add env (make_symbol "*") (Proc (make_prim_proc times_proc));;
+let env = [[((make_symbol "+"),(Prim_proc plus_proc));
+            ((make_symbol "-"),(Prim_proc minus_proc));
+            ((make_symbol "*"),(Prim_proc times_proc));]];;
 
-List.map (fun x -> print_endline (string_of_object x))
-  (List.map (fun x -> eval env (exp_of_str_tree x))
-     (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list));;
+List.map (fun x -> print_endline (string_of_object (fst (eval env (exp_of_str_tree x)))))
+  (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list);;
 
-List.map (fun x -> (exp_of_str_tree x))
+List.map (fun x -> (snd (eval env (exp_of_str_tree x))))
   (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list);;
