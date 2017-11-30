@@ -12,10 +12,6 @@ type exp =
   | Prim_proc of (exp -> exp)
   | Proc of exp * exp * exp list;;
 
-type 'a tree =
-  | Leaf of 'a
-  | Node of ('a tree) list;;
-
 let car exp =
   match exp with
   | Cons (x,y) -> !x
@@ -70,93 +66,6 @@ let make_bool value = Atom (Bool value)
 
 let make_symbol value = Symbol value
 
-let is_int s =
-  try ignore (int_of_string s); true
-  with _ -> false;;
- 
-let is_float s =
-  try ignore (float_of_string s); true
-  with _ -> false;;
-
-let list_of_string str =
-  let len = String.length str in
-  let rec iter cnt = if cnt < len then str.[cnt] :: iter (cnt+1) else [] in 
-  iter 0;;
-
-let is_str str =
-  let left ls = 
-    match ls with
-    | '"' :: xs -> xs
-    | _ -> [] in
-  let rec right ls = 
-    match ls with
-    | [] -> false
-    | '"' :: [] -> true 
-    | _ :: xs -> right xs in right (left (list_of_string str));;
-
-let is_bool str =
-  match str with
-  | "true" | "false" -> true
-  | _ -> false;;
-
-let bool_val str =
-  match str with
-  | "true" -> true
-  | "false" -> false
-  | _ -> failwith "is not boolean";;
-
-let rec separate_s_exp sexp =
-  let rec classify str =
-    match str with
-    | [] -> ([],[])
-    | (ch :: xs) ->
-       match ch with
-       | '(' -> (["("],xs)
-       | ')' -> ([")"],xs)
-       | ' ' -> ([],xs)
-       | c ->
-          match xs with
-          | [] -> ((String.make 1 c) :: [],[])
-          | ')' :: _ -> ((String.make 1 c) :: [],xs)
-          | _ -> let (l,r) = classify xs in ((String.make 1 c) :: l,r) in
-  match classify sexp with
-  | ([],[]) -> []
-  | ([],rem) -> separate_s_exp rem
-  | (res,rem) -> String.concat "" res :: separate_s_exp rem;;
-
-let rev ls =
-  let rec iter ls res =
-    match ls with
-    | [] -> res
-    | x :: xs -> iter xs (x :: res) in iter ls [];;
-
-let str_tree_list_of_str_list sexp = 
-  let rec s2exp sexp res =
-    match (sexp,res) with
-    | ([],_) -> res
-    | (")" :: xs,y :: ys) -> (match ys with
-                              | [] -> s2exp xs [[(Node (rev y))]]
-                              | z :: zs -> s2exp xs (((Node (rev y)) :: z) :: zs))
-    | ("(" :: x :: xs,_) -> s2exp xs ([Leaf x] :: res)
-    | (n :: xs,y :: ys) -> s2exp xs (((Leaf n) :: y) :: ys)
-    | ([lf],[]) -> [Leaf lf] :: []
-    | (_,[]) -> failwith "paren error" in rev (List.hd (s2exp sexp []));;
-
-let rec exp_of_str_tree str_tree =
-  let classify str =
-    if is_int str then make_int (int_of_string str)
-    else if is_float str then make_float (float_of_string str)
-    else if is_str str then make_string str
-    else if is_bool str then make_bool (bool_val str)
-    else make_symbol str in
-  match str_tree with
-  | Leaf x -> classify x
-  | Node ls ->
-     match ls with
-     | [] -> failwith "empty_cons"
-     | x :: [] -> (Cons (ref (exp_of_str_tree x),ref Nil))
-     | x :: xs -> (Cons (ref (exp_of_str_tree x),ref (exp_of_str_tree (Node xs))));;
-
 let search_frame exp frame =
   let rec iter xs ys =
     match xs,ys with
@@ -179,14 +88,14 @@ let make_frame () = Cons (ref Nil,ref Nil);;
 
 let make_env env = (make_frame ()) :: env;;
 
-let rec search_exp exp env =
+let rec search_env exp env =
   match env with
   | [] -> raise Not_found
   | x :: xs ->
      try
        search_frame exp x
      with
-       Not_found -> search_exp exp xs;;
+       Not_found -> search_env exp xs;;
 
 let bind exp value env =
   match env with
@@ -268,7 +177,7 @@ let rec eval exp env =
   else match exp with
        | Nil | Atom _ | Proc _ | Prim_proc _ -> exp
        | Cons (x,args) -> apply (eval !x env) (map (fun x -> eval x env) !args)
-       | Symbol _ -> search_exp exp env
+       | Symbol _ -> search_env exp env
 and apply proc args_val =
   let bind_sequence args exp env =
     let _ = map (fun (Cons (x1,x2)) -> let () = bind !x1 !x2 env in Nil) (zip args exp) in env in
@@ -286,54 +195,3 @@ let make_init_env env =
   let frame = make_frame () in
   let () = iter frame env in
   frame :: [];;
-
-let eq_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_bool (xx = yy)
-  | _,x,y -> failwith (String.concat "" ["eq: type_error"; (string_of_object x);]);;
-
-let plus_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx + yy)
-  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
-
-let minus_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx - yy)
-  | _,x,y -> failwith (String.concat "" ["-: type_error"; (string_of_object x);]);;
-
-let times_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx * yy)
-  | _,x,y -> failwith (String.concat "" ["*: type_error"; (string_of_object x);]);;
-
-let filter_esc ls = List.map (fun x -> match x with
-                                       | '\t' | '\n' -> ' '
-                                       | _ -> x) ls;;
-
-let rec count_paren str_ls =
-  match str_ls with
-  | [] -> 0
-  | '(' :: xs -> 1 + count_paren xs
-  | ')' :: xs -> (-1) + count_paren xs
-  | _ :: xs -> count_paren xs;;
-
-let read_s_exp chan =
-  let rec iter buf = 
-    let total_buf = buf @ (input_line chan |> list_of_string |> filter_esc) in
-    if (count_paren total_buf) = 0
-    then exp_of_str_tree (total_buf |> separate_s_exp |> str_tree_list_of_str_list |> List.hd)
-    else iter total_buf in iter [];;
-
-let env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
-                         ((make_symbol "-"),(Prim_proc minus_proc));
-                         ((make_symbol "eq"),(Prim_proc eq_proc));
-                         ((make_symbol "*"),(Prim_proc times_proc));];;
-
-let rec repl env =
-  let () = "slp_lisp > " |> print_string in
-  let _ = eval (read_s_exp stdin) env |> string_of_object |> print_endline in
-  repl env;;
-
-repl env;;
-
