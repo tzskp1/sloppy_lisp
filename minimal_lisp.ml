@@ -193,7 +193,7 @@ let rec search_exp exp env =
 let bind exp value env =
   match env with
   | [] -> failwith "environment is empty"
-  | x :: _ -> (add_frame exp value x);;
+  | x :: _ -> add_frame exp value x;;
 
 let is_tagged_list tag exp =
   match (exp,tag) with
@@ -328,21 +328,21 @@ let rec count_paren str_ls =
   | _ :: xs -> count_paren xs;;
 
 let repl () =
-  let init_env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
-                                ((make_symbol "-"),(Prim_proc minus_proc));
-                                ((make_symbol "eq"),(Prim_proc eq_proc));
-                                ((make_symbol "*"),(Prim_proc times_proc));] in
-  let rec iter buf env = 
+  let env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
+                           ((make_symbol "-"),(Prim_proc minus_proc));
+                           ((make_symbol "eq"),(Prim_proc eq_proc));
+                           ((make_symbol "*"),(Prim_proc times_proc));] in
+  let rec iter buf = 
     let total_buf = buf @ (read_line () |> list_of_string |> filter_esc) in
     if (count_paren total_buf) = 0
     then match total_buf |> separate_s_exp |> str_tree_list_of_str_list with
          | str_tree :: _ -> let res = eval (exp_of_str_tree str_tree) env in
                             let () = res |> string_of_object |> print_endline in
                             let () = "min_lisp > " |> print_string in
-                            iter [] env
+                            iter [] 
          | _ -> failwith "this pattern never occurs"
-    else iter total_buf env in
+    else iter total_buf in
   let () = "min_lisp > " |> print_string in
-  iter [] init_env;;
+  iter [];;
 
 repl ();;
