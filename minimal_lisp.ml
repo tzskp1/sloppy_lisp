@@ -1,7 +1,5 @@
 type 'a proc = 'a * 'a * 'a list;;
 
-type 'a dtype = string * 'a (* type_name,value *)
-
 type atom = 
   | Int of int 
   | Float of float 
@@ -10,8 +8,8 @@ type atom =
 
 type exp =
   | Nil
-  | Atom of atom dtype
-  | Symbol of string dtype
+  | Atom of atom
+  | Symbol of string
   | Cons of (exp ref) * (exp ref)
   | Prim_proc of (exp -> exp)
   | Proc of exp proc;;
@@ -49,30 +47,30 @@ let cadddr exp = car (cdr (cdr (cdr exp)));;
 let rec string_of_object ob =
   match ob with
   | Nil -> " Nil"
-  | Symbol (_,x) -> String.concat "" [" Symbol:"; x]
+  | Symbol x -> String.concat "" [" Symbol:"; x]
   | Cons (x,y)-> String.concat "" [" Cons"; string_of_object !x; string_of_object !y]
   | Proc (a,b,c) -> String.concat "" [" Proc"; string_of_object a; string_of_object b;] (* string_of_env c;] *)
   | Prim_proc _ -> " Prim_proc"
   | Atom a ->
      match a with
-     | (n,(Int v)) -> string_of_int v
-     | (n,(Float v)) -> string_of_float v
-     | (n,(Bool v)) -> string_of_bool v
-     | (n,(Str v)) -> v;;
+     | Int v -> string_of_int v
+     | Float v -> string_of_float v
+     | Bool v -> string_of_bool v
+     | Str v -> v;;
 
 let string_of_env env =
   let ev_st (Cons (x,y)) = String.concat "\n" ["Symbols: "; string_of_object !x; "Values: "; string_of_object !y;] in
   String.concat "" (List.map ev_st env);;
 
-let make_int value = Atom ("integer",(Int value))
+let make_int value = Atom (Int value)
 
-let make_float value = Atom ("float",(Float value))
+let make_float value = Atom (Float value)
 
-let make_string value = Atom ("string",(Str value))
+let make_string value = Atom (Str value)
 
-let make_bool value = Atom ("bool",(Bool value))
+let make_bool value = Atom (Bool value)
 
-let make_symbol value = Symbol ("symbol",value)
+let make_symbol value = Symbol value
 
 let is_int s =
   try ignore (int_of_string s); true
@@ -263,8 +261,8 @@ let rec eval exp env =
   else if is_begin exp then begin_impl (cdr exp) env
   else if is_if exp then
     match eval (car (cdr exp)) env with
-    | Atom ("bool",Bool true) ->  (eval (caddr exp) env)
-    | Atom ("bool",Bool false) ->  (eval (cadddr exp) env)
+    | Atom (Bool true) ->  (eval (caddr exp) env)
+    | Atom (Bool false) ->  (eval (cadddr exp) env)
     | _ -> failwith "is not boolean"
   else match exp with
        | Nil | Atom _ | Proc _ | Prim_proc _ -> exp
@@ -308,22 +306,22 @@ let make_init_env env =
 
 let eq_proc exp =
   match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_bool (xx = yy)
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_bool (xx = yy)
   | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
 
 let plus_proc exp =
   match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_int (xx + yy)
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx + yy)
   | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
 
 let minus_proc exp =
   match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_int (xx - yy)
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx - yy)
   | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
 
 let times_proc exp =
   match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_int (xx * yy)
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx * yy)
   | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
 
 let repl () =
