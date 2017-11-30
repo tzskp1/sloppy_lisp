@@ -338,11 +338,11 @@ let repl () =
     then match total_buf |> separate_s_exp |> str_tree_list_of_str_list with
          | str_tree :: _ -> let res = eval (exp_of_str_tree str_tree) env in
                             let () = res |> string_of_object |> print_endline in
-                            let () = "min_lisp > " |> print_string in
+                            let () = "slp_lisp > " |> print_string in
                             iter [] 
          | _ -> failwith "this pattern never occurs"
     else iter total_buf in
-  let () = "min_lisp > " |> print_string in
+  let () = "slp_lisp > " |> print_string in
   iter [];;
 
 repl ();;
