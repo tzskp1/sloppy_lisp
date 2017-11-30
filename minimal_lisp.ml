@@ -48,7 +48,7 @@ let rec string_of_object ob =
   match ob with
   | Nil -> " Nil"
   | Symbol x -> String.concat "" [" Symbol:"; x]
-  | Cons (x,y)-> String.concat "" [" Cons"; string_of_object !x; string_of_object !y]
+  | Cons (x,y)-> String.concat "" [" Cons "; string_of_object !x; string_of_object !y]
   | Proc (a,b,c) -> String.concat "" [" Proc"; string_of_object a; string_of_object b;] (* string_of_env c;] *)
   | Prim_proc _ -> " Prim_proc"
   | Atom a ->
@@ -167,7 +167,7 @@ let search_frame exp frame =
     | _ -> failwith "this pattern never occurs" in
   match frame with
   | Cons (xs,ys) -> iter !xs !ys
-  | _ -> failwith "illform frame";;
+  | _ -> failwith "illformed frame";;
 
 let rec add_frame symbol value frame =
   match frame with
@@ -175,7 +175,7 @@ let rec add_frame symbol value frame =
                     let ys' = Cons (ref value,ref !ys) in
                     let () = (xs := xs') in
                     let () = (ys := ys') in ()
-  | _ -> failwith "illform frame";;
+  | _ -> failwith "illformed frame";;
 
 let make_frame () = Cons (ref Nil,ref Nil);;
 
@@ -248,12 +248,6 @@ let rec foldl f exp init =
     | _ -> failwith "is not list" in
   iter exp init;;
 
-let snd (x,y) = y;;
-
-let fst (x,y) = x;;
-
-(* exp -> (env -> exp) *)
-
 let rec eval exp env =
   let begin_impl exp env = foldl (fun x y -> eval x env) exp Nil in
   if is_quoted exp then cadr exp
@@ -262,10 +256,11 @@ let rec eval exp env =
     | Symbol _ -> let () = bind (cadr exp) (eval (caddr exp) env) env in make_string "OK"
     | Cons (tag,args) ->
        (match !tag,!args with
-        | (Symbol _,Cons (_,_)) -> let () = bind !tag (Proc (!args,caddr exp,env)) env in make_string "OK"
-        | _ -> failwith "illform define")
-    | _ -> failwith "illform define"
-  else if is_lambda exp then Proc ((cadr exp),(caddr exp),env)
+        | Symbol _,Cons (_,_) -> let proc = Proc (!args,caddr exp,env) in
+                                 let () = bind !tag proc env in make_string "OK"
+        | _ -> failwith "illformed define")
+    | _ -> failwith "illformed define"
+  else if is_lambda exp then Proc (cadr exp,caddr exp,env)
   else if is_begin exp then begin_impl (cdr exp) env
   else if is_if exp then
     match eval (car (cdr exp)) env with
@@ -275,11 +270,7 @@ let rec eval exp env =
   else match exp with
        | Nil | Atom _ | Proc _ | Prim_proc _ -> exp
        | Cons (x,args) -> apply (eval !x env) (map (fun x -> eval x env) !args)
-       | Symbol _ ->
-          (try
-             search_exp exp env
-           with
-             Not_found -> failwith (string_of_object exp))
+       | Symbol _ -> search_exp exp env
 and apply proc args_val =
   let bind_sequence args exp env =
     let _ = map (fun (Cons (x1,x2)) -> let () = bind !x1 !x2 env in Nil) (zip args exp) in env in
@@ -287,6 +278,40 @@ and apply proc args_val =
   | Proc (args_sym,body,env) -> eval body (bind_sequence args_sym args_val (make_env env))
   | Prim_proc pr -> pr args_val
   | _ -> failwith (string_of_object proc);;
+
+let make_init_env env =
+  let rec iter frame env =
+    match env with
+    | [] -> ()
+    | (x,y) :: xs -> let () = add_frame x y frame in
+                     iter frame xs in
+  let frame = make_frame () in
+  let () = iter frame env in
+  frame :: [];;
+
+let eq_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_bool (xx = yy)
+  | _,x,y -> failwith (String.concat "" ["eq: type_error"; (string_of_object x);]);;
+
+let plus_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx + yy)
+  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
+
+let minus_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx - yy)
+  | _,x,y -> failwith (String.concat "" ["-: type_error"; (string_of_object x);]);;
+
+let times_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx * yy)
+  | _,x,y -> failwith (String.concat "" ["*: type_error"; (string_of_object x);]);;
+
+let filter_esc ls = List.map (fun x -> match x with
+                                       | '\t' | '\n' -> ' '
+                                       | _ -> x) ls;;
 
 let rec read_s_exp chan =
   try 
@@ -302,56 +327,21 @@ let rec count_paren str_ls =
   | ')' :: xs -> (-1) + count_paren xs
   | _ :: xs -> count_paren xs;;
 
-let make_init_env env =
-  let rec iter frame env =
-    match env with
-    | [] -> ()
-    | (x,y) :: xs -> let () = add_frame x y frame in
-                     iter frame xs in
-  let frame = make_frame () in
-  let () = iter frame env in
-  frame :: [];;
-
-let eq_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_bool (xx = yy)
-  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
-
-let plus_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx + yy)
-  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
-
-let minus_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx - yy)
-  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
-
-let times_proc exp =
-  match (length exp),(car exp),(cadr exp) with
-  | 2,(Atom (Int xx)),(Atom (Int yy)) -> make_int (xx * yy)
-  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
-
 let repl () =
-  let filter_esc ls = List.filter (fun x -> match x with
-                                            | '\t' | '\n' -> false
-                                            | _ -> true) ls in
   let init_env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
                                 ((make_symbol "-"),(Prim_proc minus_proc));
                                 ((make_symbol "eq"),(Prim_proc eq_proc));
                                 ((make_symbol "*"),(Prim_proc times_proc));] in
   let rec iter buf env = 
-    let total_buf = buf @ ((read_line ()) |> list_of_string |> filter_esc) in
+    let total_buf = buf @ (read_line () |> list_of_string |> filter_esc) in
     if (count_paren total_buf) = 0
-    then
-      match total_buf |> separate_s_exp |> str_tree_list_of_str_list with
-      | str_tree :: _ -> let res = eval (exp_of_str_tree str_tree) env in
-                         let () = res |> string_of_object |> print_endline in
-                         let () = "min_lisp > " |> print_string in
-                         iter [] env
-      | _ -> failwith "this pattern never occurs"
-    else
-      iter total_buf env in
+    then match total_buf |> separate_s_exp |> str_tree_list_of_str_list with
+         | str_tree :: _ -> let res = eval (exp_of_str_tree str_tree) env in
+                            let () = res |> string_of_object |> print_endline in
+                            let () = "min_lisp > " |> print_string in
+                            iter [] env
+         | _ -> failwith "this pattern never occurs"
+    else iter total_buf env in
   let () = "min_lisp > " |> print_string in
   iter [] init_env;;
 
