@@ -1,5 +1,3 @@
-type 'a proc = 'a * 'a * 'a list;;
-
 type atom = 
   | Int of int 
   | Float of float 
@@ -12,7 +10,7 @@ type exp =
   | Symbol of string
   | Cons of (exp ref) * (exp ref)
   | Prim_proc of (exp -> exp)
-  | Proc of exp proc;;
+  | Proc of exp * exp * exp list;;
 
 type 'a tree =
   | Leaf of 'a
