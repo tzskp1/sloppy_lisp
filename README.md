@@ -1,4 +1,4 @@
 # sloppy_lisp
-My lisp interpreter of OCaml
+My lisp interpreter in OCaml
 
 Thanks to SICP!
