@@ -86,11 +86,15 @@ let list_of_string str =
   iter 0;;
 
 let is_str str =
-  let rec iter ls = 
+  let left ls = 
     match ls with
+    | '"' :: xs -> xs
+    | _ -> [] in
+  let rec right ls = 
+    match ls with
+    | [] -> false
     | '"' :: [] -> true 
-    | '"' :: xs -> iter xs
-    | _ -> false in iter (list_of_string str);;
+    | _ :: xs -> right xs in right (left (list_of_string str));;
 
 let is_bool str =
   match str with
@@ -137,7 +141,8 @@ let str_tree_list_of_str_list sexp =
                               | z :: zs -> s2exp xs (((Node (rev y)) :: z) :: zs))
     | ("(" :: x :: xs,_) -> s2exp xs ([Leaf x] :: res)
     | (n :: xs,y :: ys) -> s2exp xs (((Leaf n) :: y) :: ys)
-    | (_,[]) -> failwith "paren_error" in rev (List.hd (s2exp sexp []));;
+    | ([lf],[]) -> [Leaf lf] :: []
+    | (_,[]) -> failwith "paren error" in rev (List.hd (s2exp sexp []));;
 
 let rec exp_of_str_tree str_tree =
   let classify str =
@@ -247,15 +252,18 @@ let snd (x,y) = y;;
 
 let fst (x,y) = x;;
 
+(* exp -> (env -> exp) *)
+
 let rec eval exp env =
   let begin_impl exp env = foldl (fun x y -> eval x env) exp Nil in
   if is_quoted exp then cadr exp
   else if is_define exp then
     match cadr exp with
     | Symbol _ -> let () = bind (cadr exp) (eval (caddr exp) env) env in make_string "OK"
-    (* | Cons (x,y) ->
-     *    match !x,!y with
-     *    | (Symbol _,Cons _) -> let () = bind !x (eval !y env) env in make_string "OK" *)
+    | Cons (tag,args) ->
+       (match !tag,!args with
+        | (Symbol _,Cons (_,_)) -> let () = bind !tag (Proc (!args,caddr exp,env)) env in make_string "OK"
+        | _ -> failwith "illform define")
     | _ -> failwith "illform define"
   else if is_lambda exp then Proc ((cadr exp),(caddr exp),env)
   else if is_begin exp then begin_impl (cdr exp) env
@@ -266,12 +274,12 @@ let rec eval exp env =
     | _ -> failwith "is not boolean"
   else match exp with
        | Nil | Atom _ | Proc _ | Prim_proc _ -> exp
+       | Cons (x,args) -> apply (eval !x env) (map (fun x -> eval x env) !args)
        | Symbol _ ->
           (try
              search_exp exp env
            with
              Not_found -> failwith (string_of_object exp))
-       | Cons (x,args) -> apply (eval !x env) (map (fun x -> eval x env) !args)
 and apply proc args_val =
   let bind_sequence args exp env =
     let _ = map (fun (Cons (x1,x2)) -> let () = bind !x1 !x2 env in Nil) (zip args exp) in env in
@@ -346,13 +354,5 @@ let repl () =
       iter total_buf env in
   let () = "min_lisp > " |> print_string in
   iter [] init_env;;
-
-(* let init_env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
- *                               ((make_symbol "-"),(Prim_proc minus_proc));
- *                               ((make_symbol "eq"),(Prim_proc eq_proc));
- *                               ((make_symbol "*"),(Prim_proc times_proc));];;
- * 
- * List.map (fun x -> print_endline (string_of_object (eval (exp_of_str_tree x) init_env)))
- *   (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list);; *)
 
 repl ();;
