@@ -311,13 +311,6 @@ let filter_esc ls = List.map (fun x -> match x with
                                        | '\t' | '\n' -> ' '
                                        | _ -> x) ls;;
 
-let rec read_s_exp chan =
-  try 
-    let line = input_line chan in  
-    String.concat "" [line; read_s_exp chan;]
-  with
-    e -> "";;
-
 let rec count_paren str_ls =
   match str_ls with
   | [] -> 0
@@ -325,22 +318,22 @@ let rec count_paren str_ls =
   | ')' :: xs -> (-1) + count_paren xs
   | _ :: xs -> count_paren xs;;
 
-let repl () =
-  let env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
-                           ((make_symbol "-"),(Prim_proc minus_proc));
-                           ((make_symbol "eq"),(Prim_proc eq_proc));
-                           ((make_symbol "*"),(Prim_proc times_proc));] in
+let read_s_exp chan =
   let rec iter buf = 
-    let total_buf = buf @ (read_line () |> list_of_string |> filter_esc) in
+    let total_buf = buf @ (input_line chan |> list_of_string |> filter_esc) in
     if (count_paren total_buf) = 0
-    then match total_buf |> separate_s_exp |> str_tree_list_of_str_list with
-         | str_tree :: _ -> let res = eval (exp_of_str_tree str_tree) env in
-                            let () = res |> string_of_object |> print_endline in
-                            let () = "slp_lisp > " |> print_string in
-                            iter [] 
-         | _ -> failwith "this pattern never occurs"
-    else iter total_buf in
-  let () = "slp_lisp > " |> print_string in
-  iter [];;
+    then exp_of_str_tree (total_buf |> separate_s_exp |> str_tree_list_of_str_list |> List.hd)
+    else iter total_buf in iter [];;
 
-repl ();;
+let env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
+                         ((make_symbol "-"),(Prim_proc minus_proc));
+                         ((make_symbol "eq"),(Prim_proc eq_proc));
+                         ((make_symbol "*"),(Prim_proc times_proc));];;
+
+let rec repl env =
+  let () = "slp_lisp > " |> print_string in
+  let _ = eval (read_s_exp stdin) env |> string_of_object |> print_endline in
+  repl env;;
+
+repl env;;
+
