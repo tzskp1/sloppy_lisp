@@ -1,5 +1,3 @@
-type 'a proc = 'a * 'a * 'a list;;
-
 type atom = 
   | Int of int 
   | Float of float 
@@ -12,7 +10,7 @@ type exp =
   | Symbol of string
   | Cons of (exp ref) * (exp ref)
   | Prim_proc of (exp -> exp)
-  | Proc of exp proc;;
+  | Proc of exp * exp * exp list
 
 type 'a tree =
   | Leaf of 'a
@@ -198,9 +196,9 @@ let bind exp value env =
 let is_tagged_list tag exp =
   match (exp,tag) with
   | (Cons (_,_),(Symbol t)) ->
-     (match car exp with
+     match car exp with
      | Symbol x -> x = t
-     | _ -> false)
+     | _ -> false
   | _ -> false;;
 
 let is_quoted exp = is_tagged_list (make_symbol "quote") exp;;
@@ -255,10 +253,10 @@ let rec eval exp env =
     match cadr exp with
     | Symbol _ -> let () = bind (cadr exp) (eval (caddr exp) env) env in make_string "OK"
     | Cons (tag,args) ->
-       (match !tag,!args with
-        | Symbol _,Cons (_,_) -> let proc = Proc (!args,caddr exp,env) in
-                                 let () = bind !tag proc env in make_string "OK"
-        | _ -> failwith "illformed define")
+       match !tag,!args with
+       | Symbol _,Cons (_,_) -> let proc = Proc (!args,caddr exp,env) in
+                                let () = bind !tag proc env in make_string "OK"
+       | _ -> failwith "illformed define"
     | _ -> failwith "illformed define"
   else if is_lambda exp then Proc (cadr exp,caddr exp,env)
   else if is_begin exp then begin_impl (cdr exp) env
