@@ -1,4 +1,4 @@
-type 'a proc = 'a * 'a * ('a *'a) list list;;
+type 'a proc = 'a * 'a * 'a list;;
 
 type 'a dtype = string * 'a (* type_name,value *)
 
@@ -12,7 +12,7 @@ type exp =
   | Nil
   | Atom of atom dtype
   | Symbol of string dtype
-  | Cons of exp * exp
+  | Cons of (exp ref) * (exp ref)
   | Prim_proc of (exp -> exp)
   | Proc of exp proc;;
 
@@ -20,19 +20,49 @@ type 'a tree =
   | Leaf of 'a
   | Node of ('a tree) list;;
 
-let string_of_object ob =
+let car exp =
+  match exp with
+  | Cons (x,y) -> !x
+  | _ -> failwith "is not list";;
+  
+let cdr exp =
+  match exp with
+  | Cons (x,y) -> !y
+  | _ -> failwith "is not list";;
+
+let set_car exp value = 
+  match exp with
+  | Cons (x,y) -> (x := value)
+  | _ -> failwith "is not list";;
+
+let set_cdr exp value = 
+  match exp with
+  | Cons (x,y) -> (y := value)
+  | _ -> failwith "is not list";;
+
+let cadr exp = car (cdr exp);;
+
+let caddr exp = car (cdr (cdr exp));;
+
+let cadddr exp = car (cdr (cdr (cdr exp)));;
+
+let rec string_of_object ob =
   match ob with
-  | Nil -> "Nil"
-  | Symbol (_,x) -> (String.concat "" ["Symbol:"; x])
-  | Cons (_,_)-> "Cons"
-  | Proc _ -> "Proc"
-  | Prim_proc _ -> "Prim_proc"
+  | Nil -> " Nil"
+  | Symbol (_,x) -> String.concat "" [" Symbol:"; x]
+  | Cons (x,y)-> String.concat "" [" Cons"; string_of_object !x; string_of_object !y]
+  | Proc (a,b,c) -> String.concat "" [" Proc"; string_of_object a; string_of_object b;] (* string_of_env c;] *)
+  | Prim_proc _ -> " Prim_proc"
   | Atom a ->
      match a with
      | (n,(Int v)) -> string_of_int v
      | (n,(Float v)) -> string_of_float v
      | (n,(Bool v)) -> string_of_bool v
      | (n,(Str v)) -> v;;
+
+let string_of_env env =
+  let ev_st (Cons (x,y)) = String.concat "\n" ["Symbols: "; string_of_object !x; "Values: "; string_of_object !y;] in
+  String.concat "" (List.map ev_st env);;
 
 let make_int value = Atom ("integer",(Int value))
 
@@ -123,13 +153,30 @@ let rec exp_of_str_tree str_tree =
   | Node ls ->
      match ls with
      | [] -> failwith "empty_cons"
-     | x :: [] -> (Cons ((exp_of_str_tree x),Nil))
-     | x :: xs -> (Cons ((exp_of_str_tree x),exp_of_str_tree (Node xs)));;
+     | x :: [] -> (Cons (ref (exp_of_str_tree x),ref Nil))
+     | x :: xs -> (Cons (ref (exp_of_str_tree x),ref (exp_of_str_tree (Node xs))));;
 
-let rec search_frame exp frame =
+let search_frame exp frame =
+  let rec iter xs ys =
+    match xs,ys with
+    | Nil,Nil -> raise Not_found
+    | Cons (x,xs'),Cons (y,ys') -> if !x = exp then !y else iter !xs' !ys'
+    | _ -> failwith "this pattern never occurs" in
   match frame with
-  | [] -> raise Not_found
-  | (x,y) :: xs -> if x = exp then y else search_frame exp xs
+  | Cons (xs,ys) -> iter !xs !ys
+  | _ -> failwith "illform frame";;
+
+let rec add_frame symbol value frame =
+  match frame with
+  | Cons (xs,ys) -> let xs' = Cons (ref symbol,ref !xs) in
+                    let ys' = Cons (ref value,ref !ys) in
+                    let () = (xs := xs') in
+                    let () = (ys := ys') in ()
+  | _ -> failwith "illform frame";;
+
+let make_frame () = Cons (ref Nil,ref Nil);;
+
+let make_env env = (make_frame ()) :: env;;
 
 let rec search_exp exp env =
   match env with
@@ -138,16 +185,19 @@ let rec search_exp exp env =
      try
        search_frame exp x
      with
-       Not_found -> search_exp exp xs
+       Not_found -> search_exp exp xs;;
 
 let bind exp value env =
   match env with
-  | [] -> [[(exp,value)]]
-  | x :: xs -> (((exp,value) :: x) :: xs)
+  | [] -> failwith "environment is empty"
+  | x :: _ -> (add_frame exp value x);;
 
 let is_tagged_list tag exp =
   match (exp,tag) with
-  | (Cons ((Symbol x),y),(Symbol t)) -> x = t
+  | (Cons (_,_),(Symbol t)) ->
+     (match car exp with
+     | Symbol x -> x = t
+     | _ -> false)
   | _ -> false;;
 
 let is_quoted exp = is_tagged_list (make_symbol "quote") exp;;
@@ -160,47 +210,16 @@ let is_define exp = is_tagged_list (make_symbol "define") exp;;
 
 let is_begin exp = is_tagged_list (make_symbol "begin") exp;;
 
-let car exp =
-  match exp with
-  | Cons (x,y) -> x
-  | _ -> failwith "is not list";;
-  
-let cdr exp =
-  match exp with
-  | Cons (x,y) -> y
-  | _ -> failwith "is not list";;
-
 let rec length exp =
   match exp with
   | Nil -> 0
-  | Cons (x,y) -> 1 + length y
+  | Cons (_,y) -> 1 + length !y
   | _ -> failwith "is not list";;
-
-let plus_proc exp =
-  match exp with
-  | Cons (Atom ("integer",(Int x)),Cons (Atom ("integer",(Int y)),Nil)) -> make_int (x + y)
-  | x -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
-
-let minus_proc exp =
-  match exp with
-  | Cons (Atom ("integer",(Int x)),Cons (Atom ("integer",(Int y)),Nil)) -> make_int (x - y)
-  | _ -> failwith "-: type_error";;
-
-let times_proc exp =
-  match exp with
-  | Cons (Atom ("integer",(Int x)),Cons (Atom ("integer",(Int y)),Nil)) -> make_int (x * y)
-  | _ -> failwith "*: type_error";;
 
 let rec map f exp =
   match exp with
     | Nil -> Nil
-    | Cons (x,y) -> Cons (f x,map f y)
-    | _ -> failwith "is not list";;
-
-let rec mapl f exp =
-  match exp with
-    | Cons (x,Nil) -> f x
-    | Cons (x,y) -> let _ = f x in mapl f y
+    | Cons (_,_) -> Cons (ref (f (car exp)),ref (map f (cdr exp)))
     | _ -> failwith "is not list";;
 
 let rec zip xs ys =
@@ -208,21 +227,21 @@ let rec zip xs ys =
     match (xs,ys) with
     | (Nil,_) -> Nil
     | (_,Nil) -> Nil
-    | (Cons (x,y),Cons (z,w)) -> Cons (Cons(x,z),zip y w)
+    | (Cons (x,y),Cons (z,w)) -> Cons (ref (Cons (x,z)),ref (zip !y !w))
     | _ -> failwith "is not list"
   else failwith "argument length's error";;
 
 let rec foldr f exp init =
   match exp with
   | Nil -> init
-  | Cons (x,y) -> f x (foldr f y init)
+  | Cons (x,y) -> f !x (foldr f !y init)
   | _ -> failwith "is not list";;
 
 let rec foldl f exp init =
   let rec iter exp res =
     match exp with
     | Nil -> res
-    | Cons (x,y) -> iter y (f x res)
+    | Cons (x,y) -> iter !y (f !x res)
     | _ -> failwith "is not list" in
   iter exp init;;
 
@@ -231,40 +250,36 @@ let snd (x,y) = y;;
 let fst (x,y) = x;;
 
 let rec eval exp env =
-  let begin_impl exp env = foldl (fun x y -> eval x (snd y)) exp (Nil,env) in
-  if is_quoted exp then ((car (cdr exp)),env)
+  let begin_impl exp env = foldl (fun x y -> eval x env) exp Nil in
+  if is_quoted exp then cadr exp
   else if is_define exp then
-    match car (cdr exp) with
-    | Symbol _ -> ((make_string "OK"),(bind
-                                         (car (cdr exp))
-                                         (fst (eval (car (cdr (cdr exp))) env))
-                                         env))
-    | _ -> failwith "is not symbol"
-  else if is_lambda exp then (Proc (car (cdr exp),car (cdr (cdr exp)),([]::env)),env)
+    match cadr exp with
+    | Symbol _ -> let () = bind (cadr exp) (eval (caddr exp) env) env in make_string "OK"
+    (* | Cons (x,y) ->
+     *    match !x,!y with
+     *    | (Symbol _,Cons _) -> let () = bind !x (eval !y env) env in make_string "OK" *)
+    | _ -> failwith "illform define"
+  else if is_lambda exp then Proc ((cadr exp),(caddr exp),env)
   else if is_begin exp then begin_impl (cdr exp) env
   else if is_if exp then
-    match fst (eval (car (cdr exp)) env) with
-    | Atom ("bool",Bool true) ->  (eval (car (cdr (cdr exp))) env)
-    | Atom ("bool",Bool false) ->  (eval (car (cdr (cdr (cdr exp)))) env)
+    match eval (car (cdr exp)) env with
+    | Atom ("bool",Bool true) ->  (eval (caddr exp) env)
+    | Atom ("bool",Bool false) ->  (eval (cadddr exp) env)
     | _ -> failwith "is not boolean"
   else match exp with
-       | Nil -> (Nil,env)
-       | Atom _ -> (exp,env)
+       | Nil | Atom _ | Proc _ | Prim_proc _ -> exp
        | Symbol _ ->
           (try
-             (search_exp exp env,env)
+             search_exp exp env
            with
              Not_found -> failwith (string_of_object exp))
-       | Cons (x,args) -> (apply (fst (eval x env)) (map (fun x -> fst (eval x env)) args),env)
-       | _ -> failwith "toriaezu"
+       | Cons (x,args) -> apply (eval !x env) (map (fun x -> eval x env) !args)
 and apply proc args_val =
   let bind_sequence args exp env =
-    foldl (fun (Cons (x1,x2)) env -> bind x1 x2 env) (zip args exp) env in
+    let _ = map (fun (Cons (x1,x2)) -> let () = bind !x1 !x2 env in Nil) (zip args exp) in env in
   match proc with
-  | Proc (args_sym,body,env) -> fst (eval body (bind_sequence args_sym args_val env))
+  | Proc (args_sym,body,env) -> eval body (bind_sequence args_sym args_val (make_env env))
   | Prim_proc pr -> pr args_val
-  | (Cons (_,_))-> failwith "cons"
-  | Nil -> failwith "nil"
   | _ -> failwith (string_of_object proc);;
 
 let rec read_s_exp chan =
@@ -277,34 +292,69 @@ let rec read_s_exp chan =
 let rec count_paren str_ls =
   match str_ls with
   | [] -> 0
-  | "(" :: xs -> 1 + count_paren xs
-  | ")" :: xs -> (-1) + count_paren xs
+  | '(' :: xs -> 1 + count_paren xs
+  | ')' :: xs -> (-1) + count_paren xs
   | _ :: xs -> count_paren xs;;
 
+let make_init_env env =
+  let rec iter frame env =
+    match env with
+    | [] -> ()
+    | (x,y) :: xs -> let () = add_frame x y frame in
+                     iter frame xs in
+  let frame = make_frame () in
+  let () = iter frame env in
+  frame :: [];;
+
+let eq_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_bool (xx = yy)
+  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
+
+let plus_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_int (xx + yy)
+  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
+
+let minus_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_int (xx - yy)
+  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
+
+let times_proc exp =
+  match (length exp),(car exp),(cadr exp) with
+  | 2,(Atom ("integer",(Int xx))),(Atom ("integer",(Int yy))) -> make_int (xx * yy)
+  | _,x,y -> failwith (String.concat "" ["+: type_error"; (string_of_object x);]);;
+
 let repl () =
-  let init_env = [[((make_symbol "+"),(Prim_proc plus_proc));
-              ((make_symbol "-"),(Prim_proc minus_proc));
-              ((make_symbol "*"),(Prim_proc times_proc));]] in
+  let filter_esc ls = List.filter (fun x -> match x with
+                                            | '\t' | '\n' -> false
+                                            | _ -> true) ls in
+  let init_env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
+                                ((make_symbol "-"),(Prim_proc minus_proc));
+                                ((make_symbol "eq"),(Prim_proc eq_proc));
+                                ((make_symbol "*"),(Prim_proc times_proc));] in
   let rec iter buf env = 
-    let total_buf = buf @ (separate_s_exp (list_of_string (read_line ()))) in
+    let total_buf = buf @ ((read_line ()) |> list_of_string |> filter_esc) in
     if (count_paren total_buf) = 0
     then
-      match total_buf |> str_tree_list_of_str_list with
-      | str_tree :: _ -> let (res,nenv) = eval (exp_of_str_tree str_tree) env in
+      match total_buf |> separate_s_exp |> str_tree_list_of_str_list with
+      | str_tree :: _ -> let res = eval (exp_of_str_tree str_tree) env in
                          let () = res |> string_of_object |> print_endline in
                          let () = "min_lisp > " |> print_string in
-                         iter [] nenv
+                         iter [] env
       | _ -> failwith "this pattern never occurs"
     else
       iter total_buf env in
   let () = "min_lisp > " |> print_string in
   iter [] init_env;;
 
-(* let env = [[((make_symbol "+"),(Prim_proc plus_proc));
- *             ((make_symbol "-"),(Prim_proc minus_proc));
- *             ((make_symbol "*"),(Prim_proc times_proc));]];; *)
-
-(* List.map (fun x -> print_endline (string_of_object (fst (eval (exp_of_str_tree x) env))))
+(* let init_env = make_init_env [((make_symbol "+"),(Prim_proc plus_proc));
+ *                               ((make_symbol "-"),(Prim_proc minus_proc));
+ *                               ((make_symbol "eq"),(Prim_proc eq_proc));
+ *                               ((make_symbol "*"),(Prim_proc times_proc));];;
+ * 
+ * List.map (fun x -> print_endline (string_of_object (eval (exp_of_str_tree x) init_env)))
  *   (open_in "test.lisp" |> read_s_exp |> list_of_string |> separate_s_exp |> str_tree_list_of_str_list);; *)
 
 repl ();;
